@@ -87,6 +87,12 @@ def main():
             articles = fetch_articles(sources, categories)
             send_newsletter(email, articles)
 
+            supabase.table("newsletters").insert({
+                "user_id": user_id,
+                "subject": "Your Daily ThermaPress Newsletter",
+                "articles": articles
+            }).execute()
+
             (
                 supabase
                 .table("user_profiles")
