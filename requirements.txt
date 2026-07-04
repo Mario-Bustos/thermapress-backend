@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+supabase
+resend
+feedparser
+trafilatura
+apscheduler
+python-dotenv
+httpx
+beautifulsoup4
+lxml
