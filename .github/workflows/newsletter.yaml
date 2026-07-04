@@ -2,7 +2,7 @@ name: Send Newsletters
 
 on:
   schedule:
-    - cron: '* * * * *'  # runs every minute, script filters by current time
+    - cron: '*/5 * * * *'  # runs every minute, script filters by current time
   workflow_dispatch:       # allows manual trigger from GitHub UI
 
 jobs:
