@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Callable
 
 from dotenv import load_dotenv
@@ -63,6 +63,29 @@ def should_send_newsletter(
     return within_send_window(now, newsletter_time or DEFAULT_NEWSLETTER_TIME)
 
 
+def _response_successful(response: Any) -> bool:
+    if response is None:
+        return False
+
+    if isinstance(response, dict):
+        if response.get("data") is not None:
+            return True
+        if response.get("status_code") in {200, 201, 204}:
+            return True
+        return False
+
+    if getattr(response, "data", None) is not None:
+        return True
+
+    if getattr(response, "status_code", None) in {200, 201, 204}:
+        return True
+
+    if getattr(response, "error", None) is not None:
+        return False
+
+    return False
+
+
 def persist_newsletter_record(
     supabase: Any,
     user_id: Any,
@@ -91,11 +114,20 @@ def persist_newsletter_record(
     last_error: Exception | None = None
     for payload in payloads:
         try:
+            print(f"Attempting newsletter insert payload: {payload.keys()}")
             response = supabase.table("newsletters").insert(payload).execute()
-            if getattr(response, "data", None) is not None or getattr(response, "status_code", None) in {200, 201, 204}:
+            print(f"Newsletter insert response: {response}")
+
+            if _response_successful(response):
                 return
+
+            error = getattr(response, "error", None) if response is not None else None
+            if error:
+                print(f"Newsletter insert error response: {error}")
+
         except Exception as exc:  # pragma: no cover - exercised in runtime
             last_error = exc
+            print(f"Newsletter insert exception: {exc}")
 
     if last_error is not None:
         raise RuntimeError(f"Unable to persist newsletter for {user_id}: {last_error}") from last_error
@@ -157,18 +189,23 @@ def process_user(
         print(f"Newsletter persistence failed for {email}: {exc}")
 
     if email_sent and persisted:
-        update_response = supabase.table("user_profiles").update({"last_sent": str(today)}).eq("id", user_id).execute()
-        print(f"Updated last_sent for {email}: {getattr(update_response, 'status_code', 'unknown status')}")
+        try:
+            update_response = supabase.table("user_profiles").update({"last_sent": str(today)}).eq("id", user_id).execute()
+            print(f"Updated last_sent for {email}: {getattr(update_response, 'status_code', 'unknown status')} data={getattr(update_response, 'data', None)}")
+        except Exception as exc:
+            print(f"Failed to update last_sent for {email}: {exc}")
+            return {"sent": False, "reason": "last_sent_update_failed", "articles": articles}
         return {"sent": True, "reason": "sent", "articles": articles}
 
     if email_sent and not persisted:
+        print(f"Newsletter was sent to {email} but persistence failed.")
         return {"sent": False, "reason": "persist_failed", "articles": articles}
 
     return {"sent": False, "reason": "email_failed", "articles": articles}
 
 
 def main() -> int:
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     today = now.date()
     force_send = os.getenv("FORCE_SEND", "").strip().lower() in {"1", "true", "yes", "on"}
 

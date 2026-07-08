@@ -1,19 +1,3 @@
-from base64 import b64encode
-from pathlib import Path
-
-
-def _load_logo_data_uri() -> str | None:
-    path = Path(__file__).resolve().parent / "images" / "logo-no-bg.png"
-    if not path.exists():
-        return None
-
-    encoded = b64encode(path.read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
-
-
-LOGO_DATA_URI = _load_logo_data_uri()
-
-
 def build_email(user_email: str, articles: list[dict]) -> str:
     if not articles:
         articles_html = """
@@ -25,16 +9,6 @@ def build_email(user_email: str, articles: list[dict]) -> str:
         """
     else:
         articles_html = ''.join([_article_card(a, i) for i, a in enumerate(articles)])
-
-    logo_html = ""
-    if LOGO_DATA_URI is not None:
-        logo_html = f"""
-          <tr>
-            <td style="padding: 24px 40px 0; display: flex; align-items: center;">
-              <img src=\"{LOGO_DATA_URI}\" alt=\"ThermaPress logo\" width=\"120\" style=\"display:block; max-width:100%; height:auto;\" />
-            </td>
-          </tr>
-        """
 
     return f"""
     <!DOCTYPE html>
@@ -53,8 +27,7 @@ def build_email(user_email: str, articles: list[dict]) -> str:
 
               <!-- Header -->
               <tr>
-                <td style="background: linear-gradient(90deg, #311a52 0%, #563e7c 100%); border-radius: 16px 16px 0 0; padding: 24px 40px;">
-                  {logo_html}
+                <td style="background: linear-gradient(90deg, #311a52 0%, #563e7c 100%); border-radius: 16px 16px 0 0; padding: 32px 40px;">
                   <h1 style="margin:0; font-size:28px; font-weight:800; color:#ffffff; letter-spacing:-0.5px;">
                     <span style="color:#ff7a2f;">Therma</span>Press
                   </h1>
