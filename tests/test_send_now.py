@@ -60,7 +60,7 @@ class ProcessUserTests(unittest.TestCase):
             user,
             datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc),
             supabase,
-            send_email_fn=lambda email, articles: False,
+            send_email_fn=lambda email, articles, subject: False,
             force_send=True,
         )
 
@@ -70,6 +70,34 @@ class ProcessUserTests(unittest.TestCase):
         newsletter_payload = supabase.tables["newsletters"].inserted_payloads[0]
         self.assertEqual(newsletter_payload["delivery_status"], "failed")
         self.assertEqual(newsletter_payload["user_id"], "user-1")
+
+    def test_process_user_updates_last_sent_when_email_succeeds(self):
+        supabase = FakeSupabase()
+        user = {
+            "id": "user-1",
+            "email": "user@example.com",
+            "sources": ["bbc"],
+            "categories": ["world"],
+        }
+
+        result = process_user(
+            user,
+            datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc),
+            supabase,
+            send_email_fn=lambda email, articles, subject: True,
+            force_send=True,
+        )
+
+        self.assertTrue(result["sent"])
+        self.assertEqual(result["reason"], "sent")
+        self.assertEqual(len(supabase.tables["newsletters"].inserted_payloads), 1)
+        newsletter_payload = supabase.tables["newsletters"].inserted_payloads[0]
+        self.assertEqual(newsletter_payload["delivery_status"], "sent")
+        self.assertEqual(newsletter_payload["user_id"], "user-1")
+
+        self.assertIn("user_profiles", supabase.tables)
+        self.assertEqual(supabase.tables["user_profiles"].updated_payloads, [{"last_sent": "2026-07-07"}])
+        self.assertEqual(supabase.tables["user_profiles"].eq_filter, ("id", "user-1"))
 
 
 if __name__ == "__main__":
