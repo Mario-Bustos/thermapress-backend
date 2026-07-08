@@ -107,7 +107,7 @@ def process_user(
     user: dict[str, Any],
     now: datetime,
     supabase: Any,
-    send_email_fn: Callable[[str, list[dict]], bool] = send_newsletter,
+    send_email_fn: Callable[[str, list[dict], str], bool] = send_newsletter,
     force_send: bool = False,
 ) -> dict[str, Any]:
     user_id = user["id"]
@@ -130,30 +130,39 @@ def process_user(
     if not should_send_newsletter(now, newsletter_time, last_sent, today, force_send=force_send):
         return {"sent": False, "reason": "not_due"}
 
-    print(f"Sending newsletter to {email}")
+    subject_date = f"{today.strftime('%B')} {today.day}"
+    subject = f"Your ThermaPress Newsletter - {subject_date}."
+
+    print(f"Sending newsletter to {email} with subject '{subject}'")
     articles = fetch_articles(sources, categories)
 
     try:
-        email_sent = bool(send_email_fn(email, articles))
+        email_sent = bool(send_email_fn(email, articles, subject))
     except Exception as exc:
         print(f"Email delivery failed for {email}: {exc}")
         email_sent = False
 
+    persisted = False
     try:
         persist_newsletter_record(
             supabase,
             user_id,
             email,
-            DEFAULT_SUBJECT,
+            subject,
             articles,
             "sent" if email_sent else "failed",
         )
+        persisted = True
     except Exception as exc:
         print(f"Newsletter persistence failed for {email}: {exc}")
 
-    if email_sent:
-        supabase.table("user_profiles").update({"last_sent": str(today)}).eq("id", user_id).execute()
+    if email_sent and persisted:
+        update_response = supabase.table("user_profiles").update({"last_sent": str(today)}).eq("id", user_id).execute()
+        print(f"Updated last_sent for {email}: {getattr(update_response, 'status_code', 'unknown status')}")
         return {"sent": True, "reason": "sent", "articles": articles}
+
+    if email_sent and not persisted:
+        return {"sent": False, "reason": "persist_failed", "articles": articles}
 
     return {"sent": False, "reason": "email_failed", "articles": articles}
 
