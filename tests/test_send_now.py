@@ -2,6 +2,7 @@ import sys
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -47,7 +48,8 @@ class FakeSupabase:
 
 
 class ProcessUserTests(unittest.TestCase):
-    def test_process_user_persists_newsletter_record_when_email_fails(self):
+    @patch("send_now.fetch_articles", return_value=[{"title": "Story", "summary": "Summary", "link": "https://example.com", "source": "BBC"}])
+    def test_process_user_does_not_persist_or_update_when_email_fails(self, _fetch_articles):
         supabase = FakeSupabase()
         user = {
             "id": "user-1",
@@ -66,12 +68,11 @@ class ProcessUserTests(unittest.TestCase):
 
         self.assertFalse(result["sent"])
         self.assertEqual(result["reason"], "email_failed")
-        self.assertEqual(len(supabase.tables["newsletters"].inserted_payloads), 1)
-        newsletter_payload = supabase.tables["newsletters"].inserted_payloads[0]
-        self.assertEqual(newsletter_payload["delivery_status"], "failed")
-        self.assertEqual(newsletter_payload["user_id"], "user-1")
+        self.assertNotIn("newsletters", supabase.tables)
+        self.assertNotIn("user_profiles", supabase.tables)
 
-    def test_process_user_updates_last_sent_when_email_succeeds(self):
+    @patch("send_now.fetch_articles", return_value=[{"title": "Story", "summary": "Summary", "link": "https://example.com", "source": "BBC"}])
+    def test_process_user_persists_newsletter_and_updates_last_sent_when_email_succeeds(self, _fetch_articles):
         supabase = FakeSupabase()
         user = {
             "id": "user-1",
@@ -92,12 +93,38 @@ class ProcessUserTests(unittest.TestCase):
         self.assertEqual(result["reason"], "sent")
         self.assertEqual(len(supabase.tables["newsletters"].inserted_payloads), 1)
         newsletter_payload = supabase.tables["newsletters"].inserted_payloads[0]
-        self.assertEqual(newsletter_payload["delivery_status"], "sent")
         self.assertEqual(newsletter_payload["user_id"], "user-1")
+        self.assertEqual(newsletter_payload["subject"], "Your ThermaPress Newsletter - July 7.")
+        self.assertEqual(newsletter_payload["articles"], [{"title": "Story", "summary": "Summary", "link": "https://example.com", "source": "BBC"}])
+        self.assertEqual(newsletter_payload["sent_at"], "2026-07-07T12:00:00+00:00")
 
         self.assertIn("user_profiles", supabase.tables)
         self.assertEqual(supabase.tables["user_profiles"].updated_payloads, [{"last_sent": "2026-07-07"}])
         self.assertEqual(supabase.tables["user_profiles"].eq_filter, ("id", "user-1"))
+
+    @patch("send_now.fetch_articles", return_value=[])
+    def test_process_user_uses_newsletter_timezone_date_for_subject_and_last_sent(self, _fetch_articles):
+        supabase = FakeSupabase()
+        user = {
+            "id": "user-1",
+            "email": "user@example.com",
+            "sources": ["bbc"],
+            "categories": ["world"],
+        }
+
+        result = process_user(
+            user,
+            datetime.fromisoformat("2026-07-08T23:30:00-05:00"),
+            supabase,
+            send_email_fn=lambda email, articles, subject: True,
+            force_send=True,
+        )
+
+        self.assertTrue(result["sent"])
+        newsletter_payload = supabase.tables["newsletters"].inserted_payloads[0]
+        self.assertEqual(newsletter_payload["subject"], "Your ThermaPress Newsletter - July 8.")
+        self.assertEqual(newsletter_payload["sent_at"], "2026-07-08T23:30:00-05:00")
+        self.assertEqual(supabase.tables["user_profiles"].updated_payloads, [{"last_sent": "2026-07-08"}])
 
 
 if __name__ == "__main__":

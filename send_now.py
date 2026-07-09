@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from typing import Any, Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 from supabase import create_client
@@ -13,6 +14,7 @@ load_dotenv()
 CHECK_WINDOW_MINUTES = 5
 DEFAULT_NEWSLETTER_TIME = "06:00"
 DEFAULT_SUBJECT = "Your Daily ThermaPress Newsletter"
+DEFAULT_TIME_ZONE = "America/Chicago"
 
 supabase_client: Any | None = None
 
@@ -63,6 +65,14 @@ def should_send_newsletter(
     return within_send_window(now, newsletter_time or DEFAULT_NEWSLETTER_TIME)
 
 
+def get_newsletter_timezone() -> ZoneInfo:
+    timezone_name = os.getenv("NEWSLETTER_TIME_ZONE", DEFAULT_TIME_ZONE)
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise RuntimeError(f"Invalid NEWSLETTER_TIME_ZONE: {timezone_name}") from exc
+
+
 def _response_successful(response: Any) -> bool:
     if response is None:
         return False
@@ -89,25 +99,16 @@ def _response_successful(response: Any) -> bool:
 def persist_newsletter_record(
     supabase: Any,
     user_id: Any,
-    recipient_email: str,
     subject: str,
     articles: list[dict],
-    delivery_status: str,
+    sent_at: datetime,
 ) -> None:
     payloads = [
         {
             "user_id": user_id,
-            "recipient_email": recipient_email,
             "subject": subject,
             "articles": articles,
-            "delivery_status": delivery_status,
-        },
-        {
-            "user_id": user_id,
-            "email": recipient_email,
-            "subject": subject,
-            "content": articles,
-            "status": delivery_status,
+            "sent_at": sent_at.isoformat(),
         },
     ]
 
@@ -174,38 +175,38 @@ def process_user(
         print(f"Email delivery failed for {email}: {exc}")
         email_sent = False
 
-    persisted = False
+    if not email_sent:
+        return {"sent": False, "reason": "email_failed", "articles": articles}
+
     try:
         persist_newsletter_record(
             supabase,
             user_id,
-            email,
             subject,
             articles,
-            "sent" if email_sent else "failed",
+            now,
         )
-        persisted = True
     except Exception as exc:
         print(f"Newsletter persistence failed for {email}: {exc}")
-
-    if email_sent and persisted:
-        try:
-            update_response = supabase.table("user_profiles").update({"last_sent": str(today)}).eq("id", user_id).execute()
-            print(f"Updated last_sent for {email}: {getattr(update_response, 'status_code', 'unknown status')} data={getattr(update_response, 'data', None)}")
-        except Exception as exc:
-            print(f"Failed to update last_sent for {email}: {exc}")
-            return {"sent": False, "reason": "last_sent_update_failed", "articles": articles}
-        return {"sent": True, "reason": "sent", "articles": articles}
-
-    if email_sent and not persisted:
-        print(f"Newsletter was sent to {email} but persistence failed.")
         return {"sent": False, "reason": "persist_failed", "articles": articles}
 
-    return {"sent": False, "reason": "email_failed", "articles": articles}
+    try:
+        update_response = supabase.table("user_profiles").update({"last_sent": str(today)}).eq("id", user_id).execute()
+        print(f"Updated last_sent for {email}: {getattr(update_response, 'status_code', 'unknown status')} data={getattr(update_response, 'data', None)}")
+    except Exception as exc:
+        print(f"Failed to update last_sent for {email}: {exc}")
+        return {"sent": False, "reason": "last_sent_update_failed", "articles": articles}
+
+    return {"sent": True, "reason": "sent", "articles": articles}
 
 
 def main() -> int:
-    now = datetime.now()
+    try:
+        now = datetime.now(get_newsletter_timezone())
+    except Exception as exc:
+        print(f"[send_now] Failed to initialize newsletter timezone: {exc}")
+        return 1
+
     today = now.date()
     force_send = os.getenv("FORCE_SEND", "").strip().lower() in {"1", "true", "yes", "on"}
 
