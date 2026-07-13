@@ -37,17 +37,16 @@ def get_supabase_client() -> Any:
 
 
 def within_send_window(now: datetime, newsletter_time: str) -> bool:
-    """Returns True if now is within the configured window of newsletter_time."""
+    """Returns True if now is at or shortly after the configured newsletter_time."""
     try:
         hour, minute = map(int, newsletter_time.split(":"))
     except ValueError:
         return False
 
     scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    diff = abs((now - scheduled).total_seconds())
+    diff = (now - scheduled).total_seconds()
 
-    return diff <= CHECK_WINDOW_MINUTES * 60
-
+    return 0 <= diff <= CHECK_WINDOW_MINUTES * 60
 
 def should_send_newsletter(
     now: datetime,

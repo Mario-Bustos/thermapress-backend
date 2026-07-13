@@ -28,5 +28,5 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
           NEWSLETTER_TIME_ZONE: America/Chicago
-          FORCE_SEND: 'true'
+          FORCE_SEND: 'false'
         run: python send_now.py

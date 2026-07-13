@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from send_now import process_user
+from send_now import process_user, within_send_window
 
 
 class FakeResponse:
@@ -48,6 +48,15 @@ class FakeSupabase:
 
 
 class ProcessUserTests(unittest.TestCase):
+    def test_within_send_window_does_not_send_before_scheduled_time(self):
+        self.assertFalse(within_send_window(datetime(2026, 7, 13, 7, 40), "07:43"))
+
+    def test_within_send_window_sends_shortly_after_scheduled_time(self):
+        self.assertTrue(within_send_window(datetime(2026, 7, 13, 7, 45), "07:43"))
+
+    def test_within_send_window_does_not_send_after_window_expires(self):
+        self.assertFalse(within_send_window(datetime(2026, 7, 13, 7, 49), "07:43"))
+
     @patch("send_now.fetch_articles", return_value=[{"title": "Story", "summary": "Summary", "link": "https://example.com", "source": "BBC"}])
     def test_process_user_does_not_persist_or_update_when_email_fails(self, _fetch_articles):
         supabase = FakeSupabase()
